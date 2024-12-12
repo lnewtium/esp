@@ -3,6 +3,7 @@
 #include <FastLED.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
+#include <ESPmDNS.h>
 
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
@@ -76,6 +77,15 @@ void setup() {
         Serial.print(".");
     }
     Serial.println(" Connected!");
+
+    // Initialize mDNS
+    if (!MDNS.begin("esp32-gate")) {   // Set the hostname to "esp32.local"
+        Serial.println("Error setting up MDNS responder!");
+        while(1) {
+            delay(1000);
+        }
+    }
+    Serial.println("mDNS responder started");
 
     // Multiplexer 1
     pinMode(S0, OUTPUT);
