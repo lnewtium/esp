@@ -7,12 +7,12 @@
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 
-// Настройки для светодиодной ленты
-#define LED_PIN     18  // GPIO 18 подключен к DIN ленты
-#define NUM_LEDS    16  // Количество светодиодов в ленте
-#define BRIGHTNESS  255 // Максимальная яркость
-#define LED_TYPE    WS2812B // Тип ленты
-#define COLOR_ORDER GRB // Порядок цветов
+// LEDs setups
+#define LED_PIN     18  // LEDS are connected to DIN
+#define NUM_LEDS    16  // LEDS count
+#define BRIGHTNESS  255 // Max brightness
+#define LED_TYPE    WS2812B // LED type
+#define COLOR_ORDER GRB // Color order
 
 // Define the pin connections
 #define S0 32
@@ -27,13 +27,17 @@ AsyncWebSocket ws("/ws");
 
 CRGB leds[NUM_LEDS];
 uint16_t threshold = 500;
+uint16_t inaccuracy = 50;
 
 void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
     auto *info = (AwsFrameInfo *) arg;
     if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
         data[len] = 0;
-        if (strncmp((char *) data, "threshold", strlen("threshold")) == 0) {
-            threshold = atoi((char *) data + strlen("threshold") + 1);
+        if (strncmp((char *) data, "threshold ", strlen("threshold ")) == 0) {
+            threshold = atoi((char *) data + strlen("threshold ") + 1);
+        }
+        else if (strncmp((char *) data, "inaccuracy ", strlen("inaccuracy ")) == 0) {
+            inaccuracy = atoi((char *) data + strlen("inaccuracy ") + 1);
         }
     }
 }
@@ -85,15 +89,15 @@ void setup() {
     pinMode(S2_2, OUTPUT);
     pinMode(COM_2, INPUT);
 
-    // Инициализация ленты
+    // Init leds
     CFastLED::addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS);
     FastLED.setBrightness(BRIGHTNESS);
 
-    // Установка всех светодиодов на максимальную яркость белого цвета
-//    for (auto & led : leds) {
-//        led = CRGB::White;
-//    }
-//    FastLED.show();
+    // Set leds to max brightness
+    //    for (auto & led : leds) {
+    //        led = CRGB::White;
+    //    }
+    //    FastLED.show();
 
     initWebSocket();
 
@@ -114,17 +118,41 @@ uint16_t readIrSensor2(int s0, int s1, int s2) {
     return analogRead(COM_2);
 }
 
-void sendDataToClients() {
-    ws.textAll("test");
+void sendDataToClients(uint16_t signal) {
+    char num[32];
+    sprintf(num, "ir %d", signal);
+    ws.textAll(num);
 }
 
 void loop() {
     ws.cleanupClients();
 
+    uint16_t activeSignals[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    uint8_t hold = 0;
+
     for (int i = 0; i < 8; i++) {
         uint16_t status = readIrSensor(i & 1, (i >> 1) & 1, (i >> 2) & 1);
-
+        if (status > threshold) {
+            for (auto& active : activeSignals) {
+                if (abs(active - status) > inaccuracy) {
+                    activeSignals[hold++] = status;
+                }
+            }
+        }
     }
-    sendDataToClients();
-    delay(100);
+    for (int i = 0; i < 8; i++) {
+        uint16_t status = readIrSensor2(i & 1, (i >> 1) & 1, (i >> 2) & 1);
+        if (status > threshold) {
+            for (auto& active : activeSignals) {
+                if (abs(active - status) > inaccuracy) {
+                    activeSignals[hold++] = status;
+                }
+            }
+        }
+    }
+
+    for (int i = 0; i < hold; i++) {
+        sendDataToClients(activeSignals[i]);
+    }
+    delay(50);
 }
